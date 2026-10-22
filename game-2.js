@@ -8495,6 +8495,12 @@ void main(){ gl_FragColor = packD(vD); }`;
       futFace(S.s, S.s.position, _fD);
       futSize(S.s, S.s.position);
     }
+    { const L = X.ships.filter(S => S.alive);                         // (v289: room between them -- worked out afresh each frame, so scrubbing still matches)
+      for(let it=0; it<2; it++) for(let i=0;i<L.length;i++) for(let j=i+1;j<L.length;j++){
+        const A = L[i].s.position, Bp = L[j].s.position, m = (L[i].s.scale.x + L[j].s.scale.x)*0.45;
+        const dx = A.x - Bp.x, dy = A.y - Bp.y, dz = A.z - Bp.z, d = Math.sqrt(dx*dx + dy*dy + dz*dz);
+        if(d >= m || d < 1e-9) continue; const k = (m - d)/d*0.5;
+        A.x += dx*k; A.y += dy*k; A.z += dz*k; Bp.x -= dx*k; Bp.y -= dy*k; Bp.z -= dz*k; } }
     // the shooting: a few shots a moment, picked by the clock's own dice
     const slot = Math.floor(t*5);
     if(slot !== X.slot){ X.slot = slot;
@@ -10127,7 +10133,8 @@ function raceHomeStart(race){
   const CODES_KEY = 'spaghettify.codes.v1';                         // (v254: CODES unlocked -- kept apart from progress, through resets)
   let codesOn = false; try { codesOn = sealGet(CODES_KEY) === '1'; } catch(e){}
   function progSave(){ if(window.__noSave) return; try { sealSet(PROGRESS_KEY, JSON.stringify(prog)); } catch(e){} }
-  function modeOpen(m){ return prog.all || ((m === 'computer' || m === 'creator') ? prog.modes.maw : !!prog.modes[m]); }
+  function modeOpen(m){ if(m === 'creator') return creatorOpen(); return prog.all || (m === 'computer' ? prog.modes.maw : !!prog.modes[m]); }
+  function creatorOpen(){ return !!prog && (prog.all || !!prog.foundersPaid || aiPlayable()); }   // (v289: every achievement, or the Founders pack)
   function shipOpen(k){ if(SHIP_MODELS[k] && SHIP_MODELS[k].side === 'android') return aiPlayable(); return prog.all || !!prog.ships[k] || !!prog.trap[k]; }
   function aiPlayable(){ if(prog.all) return true; try { const r = recData(); return ACH.length > 0 && ACH.every(a => r.ach[a.id]); } catch(e){ return false; } }   // (v277)
   let colOpenSet = null;
@@ -10199,7 +10206,7 @@ function raceHomeStart(race){
     if(storeTab === 'modes'){
       { const own = !!prog.foundersPaid, b = document.createElement('button');   // (v283: the Founders pack, first)
         b.className = 'st-item wide' + (own ? ' owned' : '');
-        b.innerHTML = '<b>FOUNDERS PACK</b><span>' + (own ? 'owned · thank you' : 'judge portraits · earth’s timeline · ' + FOUNDERS_DM + ' dark matter · ' + FOUNDERS_DUST.toLocaleString() + ' stardust · $2.99 once') + '</span>';
+        b.innerHTML = '<b>FOUNDERS PACK</b><span>' + (own ? 'owned · thank you' : 'judge portraits · creator mode · earth’s timeline · ' + FOUNDERS_DM + ' dark matter · ' + FOUNDERS_DUST.toLocaleString() + ' stardust · $2.99 once') + '</span>';
         if(!own) bindActivate(b, () => { SFX.fx('click'); foundersBuy(); });
         list.appendChild(b); }
       for(const [m, name, dm] of STORE_MODES){ const own = modeOpen(m);
@@ -10211,8 +10218,13 @@ function raceHomeStart(race){
         if(SHIP_MODELS[k].side === 'android') continue;                         // (v277: earned, not bought)
         const M = SHIP_MODELS[k], own = shipOpen(k), dm = M.side === 'trappist' ? STORE_TRAP_DM[k] : STORE_SHIP_DM[M.cls];
         const side = M.side === 'human' ? 'human' : M.side === 'alien' ? 'zeta' : M.side === 'raider' ? 'repti' : 'manti';
-        item(M.label, own ? side + ' · owned' : side + ' · ' + dm + ' dm', own,
-          { what:M.label, cur:'dm', cost:dm, go:()=>{ if(M.side === 'trappist'){ prog.trap[k] = true; banner('BOUGHT', M.label); progSave(); progApply(); } else unlockShip(k, false, true); } });
+        // (v289: never locked after one: each buys another for your armada, up to the tier's cap; the first also lets you fly it)
+        const F = storeFleet(M.side), t = tierOf(k), n = F ? F.fleet[t] : 0, full = !!F && n >= FLEET_CAP[t];
+        item(M.label, side + ' · ' + (F ? 'armada ' + n + '/' + FLEET_CAP[t] : own ? 'owned' : '') + (full ? ' · full' : ' · ' + dm + ' dm'), full,
+          { what:M.label, cur:'dm', cost:dm, go:()=>{
+            if(!own){ if(M.side === 'trappist'){ prog.trap[k] = true; progSave(); } else unlockShip(k, true, true); }
+            const G = storeFleet(M.side); if(G && G.fleet[t] < FLEET_CAP[t]){ G.fleet[t]++; campSave(); }
+            banner('BOUGHT', M.label + (G ? ' · armada ' + G.fleet[t] + '/' + FLEET_CAP[t] : '')); progApply(); } });
       }
       note = 'dm = dark matter';
     } else if(storeTab === 'colours'){
@@ -10245,6 +10257,11 @@ function raceHomeStart(race){
     if(prog.foundersPaid) return;
     if(!PAY.ready || !PAY.buy){ showPage(document.getElementById('pay-dialog')); return; }   // (v284: the choice, its options greyed till they're wired)
     PAY.buy('founders').then(ok => { if(ok) foundersGrant(); storeRender(); }).catch(() => { notice('The purchase didn’t go through · nothing was charged'); });
+  }
+  function storeFleet(side){                                    // (v289: your armada for that race, from your saved ship universe)
+    try { if(!campaign || campaign.__copy){ campKey = campKeyNow(); campaign = campLoad(); }
+      if(side === 'android' && !campaign.android) campaign.android = { res:300, planets:1, fleet:[2, 1, 0] };
+      return campaign[side] || null; } catch(e){ return null; }
   }
   function storeAsk(b){
     const have = b.cur === 'dm' ? prog.dm : prog.dust, word = b.cur === 'dm' ? 'dark matter' : 'stardust';
@@ -10302,7 +10319,8 @@ function raceHomeStart(race){
   window.addEventListener('pagehide', ()=>{ spotKeep(); progSave(); campSave(); });
   // what the locked things say
   function modeLockHint(m){
-    if(m === 'maw' || m === 'computer' || m === 'creator') return 'unlocks in the tutorial';
+    if(m === 'creator') return 'complete every achievement, or get the founders pack';
+    if(m === 'maw' || m === 'computer') return 'unlocks in the tutorial';
     if(m === 'ship' || m === 'earth') return 'unlocks in the tutorial';
     { const left = Math.max(0, MAW_TO_SHIP - prog.mawT); return 'play blackhole ' + Math.max(1, Math.ceil(left/60)) + ' more min to unlock'; }
   }
@@ -10387,6 +10405,8 @@ function raceHomeStart(race){
     { const d = document.querySelector('#menu-custom .d');                 // (the button's line names what's there)
       const met = [['alien', 'zeta'], ['trappist', 'manti'], ['raider', 'repti']].filter(([r]) => raceMet(r)).map(([, n]) => n);
       if(d) d.innerHTML = 'menu · blackhole · human' + (met.length ? '<br>' + met.join(' · ') : ''); }
+    { const cb = document.getElementById('mode-creator'); if(cb) cb.style.display = creatorOpen() ? '' : 'none';   // (v289: Creator hidden till it's yours)
+      const md = document.querySelector('#menu-modes .d'); if(md) md.innerHTML = 'blackhole · ship · earth<br>universe · computer' + (creatorOpen() ? ' · creator' : ''); }
     const cs = document.getElementById('cpu-ship'); if(cs) cs.classList.toggle('locked', !modeOpen('ship'));
     { const wo = document.getElementById('opt-go-world'), d = wo && wo.querySelector('.d'), open = modeOpen('universe');
       if(d && d.dataset.orig === undefined) d.dataset.orig = d.innerHTML;
@@ -10587,7 +10607,7 @@ function raceHomeStart(race){
     { page:'world', ids:['ttl-grav', 'grav-row'], t:'GRAVITY', x:'how hard everything pulls, in all modes: from none to ten times normal. off normal the worlds leave their orbits; your ship universe waits, saved, until it is back to normal. the round arrow puts it back' },
     { el:'menu-store', t:'STORE', x:'spend what you earn. let’s look inside' },
     { page:'store', tab:'modes', el:'store-wallet', t:'TWO CURRENCIES', x:'stardust: earned as you play, 1 every 10 seconds and 2 for each enemy ship destroyed. dark matter: the premium currency' },
-    { page:'store', tab:'modes', sel:'#store-list .st-item.wide', need:true, t:'FOUNDERS PACK', x:'a one-time pack: the judge portraits for your licence, earth’s timeline, 150 dark matter and 1,000 stardust' },
+    { page:'store', tab:'modes', sel:'#store-list .st-item.wide', need:true, t:'FOUNDERS PACK', x:'a one-time pack: the judge portraits for your licence, creator mode, earth’s timeline, 150 dark matter and 1,000 stardust' },
     { page:'store', tab:'modes', ids:['store-tabs', 'store-list'], t:'MODES', x:'unlock a game mode early with dark matter, instead of earning it by playing' },
     { page:'store', tab:'ships', ids:['store-tabs', 'store-list'], t:'SHIPS', x:'add new ships, for dark matter' },
     { page:'store', tab:'colours', ids:['store-tabs', 'store-list'], t:'COLOURS', x:'colours cost stardust: each buys the next column for customization' },
@@ -10604,7 +10624,7 @@ function raceHomeStart(race){
     { el:'mode-earth', modes:true, t:'EARTH', x:'follow earth through a quick history of space. you’ll watch it in this tutorial' },
     { el:'mode-universe', modes:true, t:'UNIVERSE', x:'a free camera through every scale of space. unlocks after 3 minutes of blackhole, once the tutorial is done' },
     { el:'mode-passive', modes:true, t:'COMPUTER', x:'sit back: the computer plays as the black hole or as your ship. opens with blackhole' },
-    { el:'mode-creator', modes:true, t:'CREATOR', x:'your black hole grown to the size of a star system: build worlds round it and hold them against waves of raiders. opens with blackhole' },
+    { el:'mode-creator', modes:true, need:true, t:'CREATOR', x:'your black hole grown to the size of a star system: build worlds round it and hold them against waves of raiders' },
     { modes:true, t:'NOW PLAY', x:'you’re the black hole for three minutes. first, a quick look at the controls', next:'PLAY' },
   ];
   const TUT_EXIT_I = TUT_STEPS.findIndex(st => st.el === 'menu-exit');
@@ -11152,10 +11172,11 @@ function raceHomeStart(race){
   function crStartWave(){
     if(!CR.planets.some(p => p.alive)){ crNote('Build a world first: it’s what you defend'); SFX.fx('dry'); return; }
     CR.wave++; crTool(null); crPhase('defend'); SFX.fx('alarm');
-    const n = Math.min(44, 4 + CR.wave*2), R = CR_WAVE_RACE[(CR.wave - 1) % CR_WAVE_RACE.length], groups = Math.min(4, 1 + Math.floor(CR.wave/3));
+    const n = Math.min(44, 4 + CR.wave*2), R = CR_WAVE_RACE[(CR.wave - 1) % CR_WAVE_RACE.length], groups = Math.min(8, Math.max(3, 2 + Math.floor(CR.wave/2)));
     CR.spawnLeft = [];
+    const base = Math.random()*Math.PI*2;                           // (v289: from all round the screen, evenly spread, a little off even)
     for(let g=0; g<groups; g++){
-      const dir = Math.random()*Math.PI*2, cnt = Math.round(n/groups);
+      const dir = base + g/groups*Math.PI*2 + (Math.random() - 0.5)*0.5, cnt = Math.max(1, Math.round(n/groups));
       for(let i=0;i<cnt;i++) CR.spawnLeft.push({ race:R[0], model:R[1][Math.floor(Math.random()*R[1].length)], dir:dir + (Math.random() - 0.5)*0.35, at:g*5 + i*0.35 });
       if(CR.wave % 5 === 0 && g === 0) CR.spawnLeft.push({ race:R[0], model:CR_CAPITAL[R[0]], dir, at:2, cap:true });
     }
@@ -11168,7 +11189,7 @@ function raceHomeStart(race){
     if(!aiSpriteTex[o.model]) aiSpriteTex[o.model] = new THREE.TextureLoader().load(sp[2]);
     const s = new THREE.Sprite(new THREE.SpriteMaterial({ map:aiSpriteTex[o.model], transparent:true, depthWrite:false }));
     s.userData.aspect = sp[1]/sp[0]; CR.scene.add(s);
-    const pos = new THREE.Vector3(Math.cos(o.dir)*42, (Math.random() - 0.5)*6, Math.sin(o.dir)*48);
+    const pos = new THREE.Vector3(Math.cos(o.dir)*42, (Math.random() - 0.5)*14, Math.sin(o.dir)*42);
     CR.ships.push({ s, race:o.race, model:o.model, pos, vel:new THREE.Vector3(), hp:o.cap ? 3 : 1, cap:!!o.cap, tgt:null, fireT:1 + Math.random(),
       speed:(o.cap ? 1.4 : 3.2 + Math.random()*1.4)*(1 + Math.min(0.6, CR.wave*0.03)), ph:Math.random()*6.283, dead:false, eat:0 });
   }
@@ -11288,6 +11309,10 @@ function raceHomeStart(race){
       CR.spawnLeft = CR.spawnLeft.filter(o => !o.done);
       CR.energy = Math.min(100, CR.energy + dt*5);
       for(const S of CR.ships) if(!S.dead) crShipStep(S, dt);
+      { const L = CR.ships.filter(S => !S.dead && S.eat <= 0);        // (v289: room between them)
+        for(let i=0;i<L.length;i++) for(let j=i+1;j<L.length;j++){ const A = L[i].pos, B = L[j].pos, m = (L[i].cap || L[j].cap) ? 2.2 : 1.0;
+          const dx = A.x - B.x, dy = A.y - B.y, dz = A.z - B.z, d = Math.sqrt(dx*dx + dy*dy + dz*dz);
+          if(d >= m || d < 1e-9) continue; const k = (m - d)/d*0.5; A.x += dx*k; A.y += dy*k; A.z += dz*k; B.x -= dx*k; B.y -= dy*k; B.z -= dz*k; } }
       CR.ships = CR.ships.filter(S => !S.dead);
       if(!CR.spawnLeft.length && !CR.ships.length && !CR.lost){
         const bonus = 150 + 40*CR.planets.filter(p => p.alive).length;
@@ -16459,11 +16484,14 @@ void main(){
     const visit = uTier === VISIT_TIER;
     if(loc === 'LONE') return out;                           // (only the lone hunters out there)
     for(const r of RACES){
-      if(loc === 'NB'){ if((r !== me || gameMode === 'maw') && Wd.reach[r].length > 1) out.push([r, gameMode === 'maw' ? 2 : 1, null]); continue; }
+      if(loc === 'NB'){ if((r !== me || gameMode === 'maw') && Wd.reach[r].length > 1) out.push([r, gameMode === 'maw' ? 2 : 1, null]);
+        else if(r === me && Wd.reach[r].length > 1){ const f = raceF(r); if(f && fleetCount(f) >= 10) out.push([r, clamp(Math.floor(fleetCount(f)/15), 1, 3), null]); }   // (v289)
+        continue; }
       const f = raceF(r), n = f ? fleetCount(f) : 4;
       let k = 0;
-      if(RACE_HOME[r] === loc) k = gameMode === 'maw' ? clamp(2 + Math.floor(n/3), 2, 12) : r === me ? (r === 'human' ? 2 : 0) : clamp(2 + Math.floor(n/4), 2, 5);
+      if(RACE_HOME[r] === loc) k = gameMode === 'maw' ? clamp(2 + Math.floor(n/3), 2, 12) : r === me ? clamp(2 + Math.floor(n/6), 2, 10) : clamp(2 + Math.floor(n/4), 2, 5);
       else if((r !== me || gameMode === 'maw') && Wd.reach[r].includes(loc)) k = r === 'raider' ? 3 : 2;
+      else if(r === me && Wd.reach[r].includes(loc) && n >= 4) k = clamp(Math.floor(n/8), 1, 6);   // (v289: your armada, out where your race reaches)
       if(visit) k = Math.min(k, 1);
       if(k > 0) out.push([r, k, null]);
     }
@@ -16490,7 +16518,8 @@ void main(){
   function aiWorldSpawn(r, opts){
     opts = opts || {};
     const me = mySide(), F = shipFrameR(), away = F*AI_NOTICE*1.6;
-    const pick = opts.pick || aiPickRace(r, r === me); if(!pick) return null;
+    const fm = r === me && raceF(r) && fleetCount(raceF(r)) >= 4;      // (v289: with an armada, your warships are out there too)
+    const pick = opts.pick || aiPickRace(r, r === me && !fm) || aiPickRace(r, false); if(!pick) return null;
     const at = new THREE.Vector3();
     let goal = null, how = opts.how || 'farm';
     if(how === 'travel'){ at.copy(opts.from); }
@@ -17076,10 +17105,27 @@ void main(){
       }
     }
   }
+  // (v289: every ship keeps a little room: any two closer than their sizes allow are eased apart)
+  function aiSeparate(){
+    const L = []; for(const s of aiShips) if(!s.dead) L.push(s); for(const s of allyShips) if(!s.dead) L.push(s);
+    for(let i=0;i<L.length;i++){ const a = L[i];
+      for(let j=i+1;j<L.length;j++){ const b = L[j];
+        const dx = a.pos.x - b.pos.x, dy = a.pos.y - b.pos.y, dz = a.pos.z - b.pos.z, d2 = dx*dx + dy*dy + dz*dz, m = (a.R + b.R)*1.25;
+        if(d2 >= m*m) continue;
+        let d = Math.sqrt(d2), nx, ny, nz;
+        if(d < 1e-9){ nx = Math.random() - 0.5; ny = Math.random() - 0.5; nz = Math.random() - 0.5; d = Math.hypot(nx, ny, nz) || 1; nx /= d; ny /= d; nz /= d; d = 0; }
+        else { nx = dx/d; ny = dy/d; nz = dz/d; }
+        const push = (m - d)*0.5, wa = a.K && a.K.size >= 20 ? 0.2 : 1, wb = b.K && b.K.size >= 20 ? 0.2 : 1, sw = wa + wb;   // (the big ones barely move)
+        a.pos.x += nx*push*2*wa/sw; a.pos.y += ny*push*2*wa/sw; a.pos.z += nz*push*2*wa/sw;
+        b.pos.x -= nx*push*2*wb/sw; b.pos.y -= ny*push*2*wb/sw; b.pos.z -= nz*push*2*wb/sw;
+      }
+    }
+  }
   function aiUpdate(dt){
     for(const B of aiBeams) if(B.life > 0){ B.life -= dt; if(B.life <= 0) B.line.visible = false; }
     if(!aiAllowed()){ if(aiShips.length) aiClear(); return; }
     aiPopulate(dt);                                     // (each race's ships where it lives and goes: none dropped on you)
+    aiSeparate();                                       // (v289: no two ships in the same space)
     androidTick(dt);
     if(!aiShips.length) return;
     const F = shipFrameR(), vP = Math.max(uMoveScale*22, 1e-9), up = aiCamUp(_aiU).clone();
@@ -17982,7 +18028,7 @@ void main(){
       const cc = colonizeCost(f);
       if(f.planets < PLANET_NAMES[side].length && resCan(f, side, resCost(side, cc)) && (f.planets < 4 || Math.random() < 0.35)){ resPay(f, side, resCost(side, cc)); f.planets++; did.push('settled ' + PLANET_NAMES[side][f.planets - 1]); continue; }
       let t = -1;
-      for(const u of [2, 1, 0]) if(f.planets >= TIER_NEEDS[u] && resCan(f, side, resCost(side, BUILD_COST[u])) && (u === 0 || Math.random() < 0.7)){ t = u; break; }
+      for(const u of [2, 1, 0]) if(f.fleet[u] < FLEET_CAP[u] && f.planets >= TIER_NEEDS[u] && resCan(f, side, resCost(side, BUILD_COST[u])) && (u === 0 || Math.random() < 0.7)){ t = u; break; }
       if(t < 0) break;
       resPay(f, side, resCost(side, BUILD_COST[t])); f.fleet[t]++; did.push('built a ' + TIER_WORD[side][t]);
     }
@@ -18103,7 +18149,7 @@ void main(){
     for(let t=0;t<3;t++){
       const locked = f.planets < TIER_NEEDS[t];
       set('fl-d' + (t + 1), locked ? 'needs ' + TIER_NEEDS[t] + ' planets' : 'a ' + W[t] + ' · ' + resFmt(resCost(side, BUILD_COST[t])));
-      document.getElementById('fl-b' + (t + 1)).classList.toggle('locked', locked || !resCan(f, side, resCost(side, BUILD_COST[t])));
+      document.getElementById('fl-b' + (t + 1)).classList.toggle('locked', locked || f.fleet[t] >= FLEET_CAP[t] || !resCan(f, side, resCost(side, BUILD_COST[t])));
     }
     const pl = (n, w) => n + ' ' + w + (n === 1 ? '' : 's');
     {
@@ -18152,6 +18198,7 @@ void main(){
     launchLeft -= dt;
     if(launchLeft <= 0){ launchLeft = 0; notice('You have the controls'); uiUnlock(); }
   }
+  const FLEET_CAP = [50, 25, 6];                                  // (v289: scout tier, gunner tier, commander tier)
   function fleetBuy(what){
     const f = myFaction(), side = mySide();
     if(what === 'planet'){
@@ -18161,6 +18208,7 @@ void main(){
       notice(PLANET_NAMES[side][f.planets - 1] + ' is settled · +' + PLANET_INCOME + ' resources a minute, +2 ammo');
     } else {
       const t = what;
+      if(f.fleet[t] >= FLEET_CAP[t]){ SFX.fx('dry'); notice('Your armada holds at most ' + FLEET_CAP[t] + ' of that tier'); return; }
       if(f.planets < TIER_NEEDS[t] || !resCan(f, side, resCost(side, BUILD_COST[t]))){ SFX.fx('dry'); return; }
       resPay(f, side, resCost(side, BUILD_COST[t])); f.fleet[t]++; SFX.fx('build');
       if(recOn()) recData().built[t]++;
