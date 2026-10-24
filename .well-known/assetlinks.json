@@ -1,0 +1,14 @@
+[
+  {
+    "relation": [
+      "delegate_permission/common.handle_all_urls"
+    ],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "io.github.judgiegames.twa",
+      "sha256_cert_fingerprints": [
+        "F0:A3:D2:C3:51:7A:DE:52:95:90:3A:95:C0:7E:6D:E1:9F:8A:2F:3A:4E:01:A2:3B:56:D3:21:F0:A4:B3:C2:E1"
+      ]
+    }
+  }
+]
