@@ -1,7 +1,7 @@
 # Spaghettify
 
 A black hole eating its way from the Solar System to the edge of the observable universe, ships of four races,
-and Earth's whole story from its birth to the Sun's last light. A single-page mobile web game (build v289).
+and Earth's whole story from its birth to the Sun's last light. A single-page mobile web game (build v326).
 
 ## Play
 Open the site's address in Chrome on your phone, then menu → **Install app** (or **Add to Home screen**) to get the
